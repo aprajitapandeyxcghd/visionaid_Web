@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>VisionAid - Indoor Object Detection (Fast Mode)</title>
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@3.21.0"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/coco-ssd"></script>
+
+  <style>
+    body {
+      text-align: center;
+      background-color: #f2f2f2;
+      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    }
+
+    h1 {
+      color: #222;
+      margin-top: 15px;
+    }
+
+    #camera-container {
+      position: relative;
+      display: inline-block;
+      margin-top: 20px;
+    }
+
+    /* Hide visually but keep active */
+    video {
+      position: absolute;
+      top: 0;
+      left: 0;
+      opacity: 0;
+      pointer-events: none;
+      width: 640px;
+      height: 480px;
+    }
+
+    canvas {
+      border-radius: 12px;
+      border: 3px solid #333;
+      width: 640px;
+      height: 480px;
+      background-color: black;
+    }
+
+    #status {
+      margin-top: 15px;
+      font-size: 18px;
+      color: #333;
+      font-weight: 500;
+    }
+  </style>
+</head>
+
+<body>
+  <h1>VisionAid - Indoor Object Detection (Fast Mode)</h1>
+  <div id="camera-container">
+    <video id="live-video" autoplay muted playsinline></video>
+    <canvas id="canvas"></canvas>
+  </div>
+  <p id="status">Loading model...</p>
+
+  <script>
+    const video = document.getElementById('live-video');
+    const canvas = document.getElementById('canvas');
+    const ctx = canvas.getContext('2d');
+    const statusEl = document.getElementById('status');
+    let model;
+    let lastSpoken = "";
+    let lastPredictions = [];
+
+    async function startCamera() {
+      const stream = await navigator.mediaDevices.getUserMedia({ video: true });
+      video.srcObject = stream;
+      return new Promise(resolve => (video.onloadedmetadata = resolve));
+    }
+
+    async function loadModel() {
+      statusEl.innerText = "Loading object detection model...";
+      model = await cocoSsd.load();
+      statusEl.innerText = "Model loaded! Detecting objects...";
+      startDetectionLoop();
+    }
+
+    function speak(text) {
+      if (text !== lastSpoken) {
+        const utterance = new SpeechSynthesisUtterance(text);
+        utterance.rate = 1.0;
+        speechSynthesis.speak(utterance);
+        lastSpoken = text;
+      }
+    }
+
+    function drawFrame() {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+
+      // Draw bounding boxes and labels (except for person)
+      lastPredictions.forEach(pred => {
+        if (pred.class === 'person') return; // skip drawing for person
+
+        const [x, y, width, height] = pred.bbox;
+        ctx.strokeStyle = "#00FF00";
+        ctx.lineWidth = 3;
+        ctx.strokeRect(x, y, width, height);
+        ctx.fillStyle = "#00FF00";
+        ctx.font = "16px Arial";
+        ctx.fillText(`${pred.class} (${(pred.score * 100).toFixed(1)}%)`, x, y > 10 ? y - 5 : 10);
+      });
+
+      requestAnimationFrame(drawFrame);
+    }
+
+    async function startDetectionLoop() {
+      drawFrame();
+
+      setInterval(async () => {
+        if (!model) return;
+        const predictions = await model.detect(video);
+        lastPredictions = predictions.filter(p => p.score > 0.2);
+
+        if (lastPredictions.length > 0) {
+          const objectNames = lastPredictions.map(p => p.class);
+          const uniqueObjects = [...new Set(objectNames)];
+          const detectedText = uniqueObjects.join(", ");
+          speak(`${detectedText} detected`);
+          statusEl.innerText = `Detected: ${detectedText}`;
+        } else {
+          statusEl.innerText = "No objects detected";
+        }
+      }, 200);
+    }
+
+    startCamera().then(loadModel);
+  </script>
+</body>
+</html>
